@@ -2,7 +2,10 @@ version: "2"
 sql:
   - schema: "sql/schema"
     queries: "sql/queries"
-    engine: "postgresql"
     gen:
       go:
+        package: "database"
         out: "internal/database"
+    engine: "postgresql"
+    database:
+      uri: "postgres://postgres:postgres@localhost:5432/chirpy?sslmode=disable"
