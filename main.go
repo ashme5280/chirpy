@@ -24,6 +24,7 @@ type apiConfig struct {
 	db             *database.Queries
 	platform       string
 	jwtSecret	   string
+	polkaKey	   string
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -490,9 +491,19 @@ func (cfg *apiConfig) handlerWebhook(w http.ResponseWriter, r *http.Request) {
 		} `json:"data"`
 	}
 
+	apiKey, err := auth.GetAPIKey(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Couldn't find API key")
+		return
+	}
+	if apiKey != cfg.polkaKey {
+		respondWithError(w, http.StatusUnauthorized, "API key is invalid")
+		return
+	}
+
 	decoder := json.NewDecoder(r.Body)
 	params := parameters{}
-	err := decoder.Decode(&params)
+	err = decoder.Decode(&params)
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "Invalid request payload")
 		return
@@ -510,17 +521,17 @@ func (cfg *apiConfig) handlerWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err = cfg.db.UpgradeToChirpyRed(r.Context(), userID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			respondWithError(w, http.StatusNotFound, "Couldn't find user")
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				respondWithError(w, http.StatusNotFound, "Couldn't find user")
+				return
+			}
+			respondWithError(w, http.StatusInternalServerError, "Couldn't update user")
 			return
 		}
-		respondWithError(w, http.StatusInternalServerError, "Couldn't update user")
-		return
-	}
 
-	w.WriteHeader(http.StatusNoContent)
-}
+		w.WriteHeader(http.StatusNoContent)
+	} // <-- Make sure there is ONLY ONE closing brace here before func main()
 
 func main() {
 	err := godotenv.Load()
@@ -551,10 +562,16 @@ func main() {
 			log.Fatal("JWT_SECRET must be set in environment")
 		}
 
+		polkaKey := os.Getenv("POLKA_KEY")
+		if polkaKey == "" {
+			log.Fatal("POLKA_KEY must be set in environment")
+		}
+
 		cfg := apiConfig{
 			db:        dbQueries,
 			platform:  platform,
 			jwtSecret: jwtSecret,
+			polkaKey:  polkaKey,
 		}
 
 	mux := http.NewServeMux()
