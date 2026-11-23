@@ -165,12 +165,6 @@ func (cfg *apiConfig) handlerGetChirps(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sortDirection := "asc"
-	sortDirectionParam := r.URL.Query().Get("sort")
-	if sortDirectionParam == "desc" {
-		sortDirection = "desc"
-	}
-
 	type responseChirp struct {
 		ID        string    `json:"id"`
 		CreatedAt time.Time `json:"created_at"`
@@ -189,13 +183,6 @@ func (cfg *apiConfig) handlerGetChirps(w http.ResponseWriter, r *http.Request) {
 			UserID:    dbChirp.UserID.String(),
 		})
 	}
-
-	sort.Slice(chirps, func(i, j int) bool {
-		if sortDirection == "desc" {
-			return chirps[i].CreatedAt.After(chirps[j].CreatedAt)
-		}
-		return chirps[i].CreatedAt.Before(chirps[j].CreatedAt)
-	})
 
 	respondWithJSON(w, http.StatusOK, chirps)
 }
