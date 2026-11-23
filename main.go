@@ -8,14 +8,15 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
 
-	"github.com/ashme5280/Chirpy/internal/database"
 	"github.com/ashme5280/Chirpy/internal/auth"
-	"github.com/joho/godotenv"
+	"github.com/ashme5280/Chirpy/internal/database"
 	"github.com/google/uuid"
+	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
 
@@ -23,8 +24,8 @@ type apiConfig struct {
 	fileserverHits atomic.Int32
 	db             *database.Queries
 	platform       string
-	jwtSecret	   string
-	polkaKey	   string
+	jwtSecret      string
+	polkaKey       string
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -142,11 +143,32 @@ func (cfg *apiConfig) handlerCreateChirp(w http.ResponseWriter, r *http.Request)
 }
 
 func (cfg *apiConfig) handlerGetChirps(w http.ResponseWriter, r *http.Request) {
-	dbChirps, err := cfg.db.GetChirps(r.Context())
+	authorIDString := r.URL.Query().Get("author_id")
+
+	var dbChirps []database.Chirp
+	var err error
+
+	if authorIDString != "" {
+		authorID, parseErr := uuid.Parse(authorIDString)
+		if parseErr != nil {
+			respondWithError(w, http.StatusBadRequest, "Invalid author ID")
+			return
+		}
+		dbChirps, err = cfg.db.GetChirpsByAuthor(r.Context(), authorID)
+	} else {
+		dbChirps, err = cfg.db.GetChirps(r.Context())
+	}
+
 	if err != nil {
 		log.Printf("DATABASE ERROR in GetChirps: %v", err)
 		respondWithError(w, http.StatusInternalServerError, "Couldn't retrieve chirps")
 		return
+	}
+
+	sortDirection := "asc"
+	sortDirectionParam := r.URL.Query().Get("sort")
+	if sortDirectionParam == "desc" {
+		sortDirection = "desc"
 	}
 
 	type responseChirp struct {
@@ -167,6 +189,13 @@ func (cfg *apiConfig) handlerGetChirps(w http.ResponseWriter, r *http.Request) {
 			UserID:    dbChirp.UserID.String(),
 		})
 	}
+
+	sort.Slice(chirps, func(i, j int) bool {
+		if sortDirection == "desc" {
+			return chirps[i].CreatedAt.After(chirps[j].CreatedAt)
+		}
+		return chirps[i].CreatedAt.Before(chirps[j].CreatedAt)
+	})
 
 	respondWithJSON(w, http.StatusOK, chirps)
 }
@@ -244,7 +273,7 @@ func (cfg *apiConfig) handlerDeleteChirp(w http.ResponseWriter, r *http.Request)
 
 func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
-		Email string `json:"email"`
+		Email    string `json:"email"`
 		Password string `json:"password"`
 	}
 
@@ -264,8 +293,8 @@ func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) 
 	}
 
 	user, err := cfg.db.CreateUser(r.Context(), database.CreateUserParams{
-		Email:			params.Email,
-		HashedPassword:	hashedPassword,
+		Email:          params.Email,
+		HashedPassword: hashedPassword,
 	})
 	if err != nil {
 		log.Printf("DATABASE ERROR in CreateUser: %v", err)
@@ -274,19 +303,19 @@ func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) 
 	}
 
 	type responseUser struct {
-		ID			string		`json:"id"`
-		CreatedAt	time.Time	`json:"created_at"`
-		UpdatedAt	time.Time	`json:"updated_at"`
-		Email		string		`json:"email"`
-		IsChirpyRed	bool		`json:"is_chirpy_red"`
+		ID          string    `json:"id"`
+		CreatedAt   time.Time `json:"created_at"`
+		UpdatedAt   time.Time `json:"updated_at"`
+		Email       string    `json:"email"`
+		IsChirpyRed bool      `json:"is_chirpy_red"`
 	}
 
 	respondWithJSON(w, http.StatusCreated, responseUser{
-		ID:        	user.ID.String(),
-		CreatedAt: 	user.CreatedAt,
-		UpdatedAt: 	user.UpdatedAt,
-		Email:     	user.Email,
-		IsChirpyRed:	user.IsChirpyRed,
+		ID:          user.ID.String(),
+		CreatedAt:   user.CreatedAt,
+		UpdatedAt:   user.UpdatedAt,
+		Email:       user.Email,
+		IsChirpyRed: user.IsChirpyRed,
 	})
 }
 
@@ -345,17 +374,17 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 		Email        string    `json:"email"`
 		Token        string    `json:"token"`
 		RefreshToken string    `json:"refresh_token"`
-		IsChirpyRed	 bool	   `json:"is_chirpy_red"`
+		IsChirpyRed  bool      `json:"is_chirpy_red"`
 	}
 
 	respondWithJSON(w, http.StatusOK, responseUser{
-		ID:           	user.ID.String(),
-		CreatedAt:    	user.CreatedAt,
-		UpdatedAt:    	user.UpdatedAt,
-		Email:        	user.Email,
-		Token:        	accessToken,
-		RefreshToken: 	refreshToken,
-		IsChirpyRed:	user.IsChirpyRed,
+		ID:           user.ID.String(),
+		CreatedAt:    user.CreatedAt,
+		UpdatedAt:    user.UpdatedAt,
+		Email:        user.Email,
+		Token:        accessToken,
+		RefreshToken: refreshToken,
+		IsChirpyRed:  user.IsChirpyRed,
 	})
 }
 
@@ -430,19 +459,19 @@ func (cfg *apiConfig) handlerUpdateUser(w http.ResponseWriter, r *http.Request) 
 	}
 
 	type responseUser struct {
-		ID        	string      `json:"id"`
-		CreatedAt 	time.Time   `json:"created_at"`
-		UpdatedAt 	time.Time   `json:"updated_at"`
-		Email    	string      `json:"email"`
-		IsChirpyRed	bool		`json:"is_chirpy_red"`
+		ID          string    `json:"id"`
+		CreatedAt   time.Time `json:"created_at"`
+		UpdatedAt   time.Time `json:"updated_at"`
+		Email       string    `json:"email"`
+		IsChirpyRed bool      `json:"is_chirpy_red"`
 	}
 
 	respondWithJSON(w, http.StatusOK, responseUser{
-		ID:        		user.ID.String(),
-		CreatedAt: 		user.CreatedAt,
-		UpdatedAt: 		user.UpdatedAt,
-		Email:     		user.Email,
-		IsChirpyRed:	user.IsChirpyRed,
+		ID:          user.ID.String(),
+		CreatedAt:   user.CreatedAt,
+		UpdatedAt:   user.UpdatedAt,
+		Email:       user.Email,
+		IsChirpyRed: user.IsChirpyRed,
 	})
 }
 
@@ -464,9 +493,9 @@ func (cfg *apiConfig) handlerRevoke(w http.ResponseWriter, r *http.Request) {
 
 func (cfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) {
 	if cfg.platform != "dev" {
-    w.WriteHeader(http.StatusForbidden)
-    w.Write([]byte("Reset is only allowed in dev environment."))
-    return
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte("Reset is only allowed in dev environment."))
+		return
 	}
 
 	cfg.fileserverHits.Store(0)
@@ -521,17 +550,17 @@ func (cfg *apiConfig) handlerWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err = cfg.db.UpgradeToChirpyRed(r.Context(), userID)
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				respondWithError(w, http.StatusNotFound, "Couldn't find user")
-				return
-			}
-			respondWithError(w, http.StatusInternalServerError, "Couldn't update user")
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			respondWithError(w, http.StatusNotFound, "Couldn't find user")
 			return
 		}
+		respondWithError(w, http.StatusInternalServerError, "Couldn't update user")
+		return
+	}
 
-		w.WriteHeader(http.StatusNoContent)
-	} // <-- Make sure there is ONLY ONE closing brace here before func main()
+	w.WriteHeader(http.StatusNoContent)
+}
 
 func main() {
 	err := godotenv.Load()
@@ -558,21 +587,21 @@ func main() {
 	dbQueries := database.New(db)
 
 	jwtSecret := os.Getenv("JWT_SECRET")
-		if jwtSecret == "" {
-			log.Fatal("JWT_SECRET must be set in environment")
-		}
+	if jwtSecret == "" {
+		log.Fatal("JWT_SECRET must be set in environment")
+	}
 
-		polkaKey := os.Getenv("POLKA_KEY")
-		if polkaKey == "" {
-			log.Fatal("POLKA_KEY must be set in environment")
-		}
+	polkaKey := os.Getenv("POLKA_KEY")
+	if polkaKey == "" {
+		log.Fatal("POLKA_KEY must be set in environment")
+	}
 
-		cfg := apiConfig{
-			db:        dbQueries,
-			platform:  platform,
-			jwtSecret: jwtSecret,
-			polkaKey:  polkaKey,
-		}
+	cfg := apiConfig{
+		db:        dbQueries,
+		platform:  platform,
+		jwtSecret: jwtSecret,
+		polkaKey:  polkaKey,
+	}
 
 	mux := http.NewServeMux()
 
